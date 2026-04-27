@@ -11,6 +11,8 @@ import argparse
 import json
 import urllib.request
 import urllib.error
+import threading
+import time
 
 
 SYSTEM_PROMPT = """You are an expert at writing conventional Git commit messages.
@@ -150,13 +152,32 @@ def generate_with_claude(user_message: str, model: str) -> str:
     return response.content[0].text.strip()
 
 
+def spinner(stop_event: threading.Event) -> None:
+    """Show an animated spinner while Ollama is thinking."""
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    # Fallback for terminals that don't support unicode
+    try:
+        frames[0].encode(sys.stdout.encoding or "utf-8")
+    except (UnicodeEncodeError, TypeError):
+        frames = ["|", "/", "-", "\\"]
+
+    i = 0
+    while not stop_event.is_set():
+        elapsed = i // len(frames)
+        frame = frames[i % len(frames)]
+        print(f"\r  {frame} Thinking... ({elapsed}s)", end="", flush=True)
+        time.sleep(0.1)
+        i += 1
+    print("\r" + " " * 30 + "\r", end="", flush=True)
+
+
 def generate_with_ollama(user_message: str, model: str, host: str) -> str:
-    """Generate commit message using Ollama local API."""
+    """Generate commit message using Ollama local API with streaming."""
     url = f"{host.rstrip('/')}/api/chat"
 
     payload = json.dumps({
         "model": model,
-        "stream": False,
+        "stream": True,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
@@ -170,23 +191,46 @@ def generate_with_ollama(user_message: str, model: str, host: str) -> str:
         method="POST",
     )
 
+    # Start spinner in background thread
+    stop_spinner = threading.Event()
+    spin_thread = threading.Thread(target=spinner, args=(stop_spinner,), daemon=True)
+    spin_thread.start()
+
+    full_text = []
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            text = result["message"]["content"].strip()
-            # Strip markdown code fences some models wrap output in
-            if text.startswith("```"):
-                lines = text.splitlines()
-                lines = [l for l in lines if not l.strip().startswith("```")]
-                text = "\n".join(lines).strip()
-            return text
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        full_text.append(token)
+                    if chunk.get("done"):
+                        break
+                except json.JSONDecodeError:
+                    continue
+
     except urllib.error.URLError:
+        stop_spinner.set()
         print(f"\nError: Cannot connect to Ollama at {host}")
         print("Make sure Ollama is running. Start it with: ollama serve")
         sys.exit(1)
-    except KeyError:
-        print("\nError: Unexpected response from Ollama.")
-        sys.exit(1)
+    finally:
+        stop_spinner.set()
+        spin_thread.join()
+
+    text = "".join(full_text).strip()
+
+    # Strip markdown code fences some models wrap output in
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    return text
 
 
 def generate_commit_message(
@@ -310,7 +354,10 @@ Examples:
         sys.exit(1)
 
     provider_label = f"Ollama ({args.model})" if args.provider == "ollama" else f"Claude ({args.model})"
-    print(f"Analyzing changes via {provider_label}...", end=" ", flush=True)
+    if args.provider == "ollama":
+        print(f"Analyzing changes via {provider_label}...")
+    else:
+        print(f"Analyzing changes via {provider_label}...", end=" ", flush=True)
 
     diff = get_git_diff(staged_only=not args.all)
     status = get_git_status()
@@ -324,7 +371,8 @@ Examples:
             print("No staged changes. Use `git add` to stage files, or run with --all.")
         sys.exit(0)
 
-    print("generating message...", end=" ", flush=True)
+    if args.provider != "ollama":
+        print("generating message...", end=" ", flush=True)
 
     message = generate_commit_message(
         diff=diff,
