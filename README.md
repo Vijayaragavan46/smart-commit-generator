@@ -1,6 +1,6 @@
 # Smart Commit Generator
 
-A lightweight CLI tool that analyzes your Git changes and uses **Claude AI** to generate clear, meaningful, and standardized commit messages following the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+A lightweight CLI tool that analyzes your Git changes and uses **Claude AI or Ollama (local/free)** to generate clear, meaningful, and standardized commit messages following the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 
 No more vague commits like `"fix stuff"` or `"update files"` — get professional commit messages automatically.
 
@@ -9,13 +9,13 @@ No more vague commits like `"fix stuff"` or `"update files"` — get professiona
 ## Example Output
 
 ```
-────────────────────────────────────────────────────────────
-fix(auth): replace hardcoded credentials with environment variables
+------------------------------------------------------------
+feat(auth): replace hardcoded credentials with environment variables
 
 Hardcoded admin credentials posed a security risk and would fail
 in production. Auth now reads from ADMIN_USER and ADMIN_PASS
 environment variables.
-────────────────────────────────────────────────────────────
+------------------------------------------------------------
 ```
 
 ---
@@ -37,46 +37,52 @@ environment variables.
 
 ---
 
+## Providers
+
+| Provider | Cost | Requires | Quality | Speed |
+|---|---|---|---|---|
+| **Claude AI** (default) | Pay per use | Anthropic API key | Best | Fast |
+| **Ollama** (local) | Free forever | Ollama installed | Good | 30-60s (CPU) |
+| **Ollama** (remote server) | Server cost | Ollama on server | Good | Fast |
+
+---
+
 ## Requirements
 
 - Python 3.10 or higher
 - Git installed
-- An Anthropic API key → [console.anthropic.com](https://console.anthropic.com)
+- **Claude:** Anthropic API key → [console.anthropic.com](https://console.anthropic.com)
+- **Ollama:** Ollama installed → [ollama.com](https://ollama.com)
 
 ---
 
 ## Installation
 
-### Step 1 — Clone or download the project
+### Step 1 — Install the package
 
 ```bash
-# Clone
-git clone https://github.com/your-username/smart-commit-generator.git
-cd smart-commit-generator
-
-# Or just download and navigate into the folder
-cd path/to/smart-commit-generator
+pip install smart-commit-generator
 ```
 
-### Step 2 — Install dependencies and register the CLI
+### Step 2 — Set up your provider
 
+#### Option A — Claude AI (best quality)
+Get your API key from [console.anthropic.com](https://console.anthropic.com) and set it as an environment variable (see [Setting the API Key](#setting-the-api-key)).
+
+#### Option B — Ollama (free, local, no API key)
+Install Ollama and pull a model:
 ```bash
-pip install -e .
+# Install Ollama from https://ollama.com/download
+ollama pull gemma3
 ```
-
-This installs the `smart-commit` command globally so you can run it from any folder.
-
-### Step 3 — Set your Anthropic API key
-
-Get your key from [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key.
 
 ---
 
-## Setting the API Key
+## Setting the API Key (Claude only)
 
 ### Windows
 
-#### Option A — Temporary (current terminal session only)
+#### Temporary (current session only)
 
 **CMD:**
 ```cmd
@@ -88,7 +94,7 @@ set ANTHROPIC_API_KEY=sk-ant-your-key-here
 $env:ANTHROPIC_API_KEY = "sk-ant-your-key-here"
 ```
 
-#### Option B — Permanent (recommended)
+#### Permanent (recommended)
 
 1. Press `Win + R`, type `sysdm.cpl`, press Enter
 2. Go to **Advanced** tab → click **Environment Variables**
@@ -96,92 +102,93 @@ $env:ANTHROPIC_API_KEY = "sk-ant-your-key-here"
 4. Set:
    - Variable name: `ANTHROPIC_API_KEY`
    - Variable value: `sk-ant-your-key-here`
-5. Click **OK** on all dialogs
-6. **Restart your terminal** — it now works in CMD, PowerShell, VS Code, Git Bash, etc.
+5. Click **OK** → restart your terminal
 
 ---
 
 ### macOS / Linux
 
-#### Option A — Temporary (current terminal session only)
+#### Temporary
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-your-key-here"
 ```
 
-#### Option B — Permanent (recommended)
+#### Permanent
 
-Add the export line to your shell profile file:
-
-**For zsh (default on macOS):**
+**zsh (default on macOS):**
 ```bash
 echo 'export ANTHROPIC_API_KEY="sk-ant-your-key-here"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-**For bash:**
+**bash:**
 ```bash
 echo 'export ANTHROPIC_API_KEY="sk-ant-your-key-here"' >> ~/.bashrc
 source ~/.bashrc
-```
-
-Verify it's set:
-```bash
-echo $ANTHROPIC_API_KEY
 ```
 
 ---
 
 ## Usage
 
-Navigate to any Git repository and run:
-
-### Basic — Analyze staged changes
+### Claude AI (default)
 
 ```bash
-# 1. Stage your files
+# Stage your files
 git add .
 
-# 2. Generate commit message
+# Generate commit message
 smart-commit
-```
 
-### Auto-commit — Generate and commit in one step
-
-```bash
-git add .
+# Generate and commit immediately
 smart-commit --apply
 ```
 
-### Analyze all changes (no need to stage first)
+### Ollama — Local (free, no API key)
 
 ```bash
-smart-commit --all
+# Install Ollama + pull model (one time)
+ollama pull gemma3
+
+# Stage your files
+git add .
+
+# Generate commit message using local Ollama
+smart-commit --provider ollama
+
+# Use a specific model
+smart-commit --provider ollama --model gemma3:12b
+
+# Generate and commit immediately
+smart-commit --provider ollama --apply
 ```
 
-### Copy message to clipboard
+### Ollama — Remote Server (shared team server)
 
 ```bash
-smart-commit --copy
+# Point to your team's server
+smart-commit --provider ollama --host http://YOUR_SERVER_IP:11434
+
+# Set permanently so you never have to type --host
 ```
 
-### Use a different Claude model
-
-```bash
-# Faster and cheaper
-smart-commit --model claude-sonnet-4-6
-
-# Fastest and most cost-effective
-smart-commit --model claude-haiku-4-5
-
-# Most powerful (default)
-smart-commit --model claude-opus-4-6
+**Windows (permanent):**
+```cmd
+setx SMART_COMMIT_OLLAMA_HOST "http://YOUR_SERVER_IP:11434"
+setx SMART_COMMIT_PROVIDER "ollama"
 ```
 
-### Skip recent commit history context
-
+**macOS/Linux (permanent):**
 ```bash
-smart-commit --no-context
+echo 'export SMART_COMMIT_OLLAMA_HOST="http://YOUR_SERVER_IP:11434"' >> ~/.zshrc
+echo 'export SMART_COMMIT_PROVIDER="ollama"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Then just run:
+```bash
+smart-commit
 ```
 
 ---
@@ -195,10 +202,17 @@ Options:
   --all, -a         Analyze all changes (staged + unstaged)
   --apply           Commit immediately with the generated message
   --copy, -c        Copy the generated message to clipboard
-  --model, -m       Claude model to use:
-                      claude-opus-4-6     (default, most powerful)
-                      claude-sonnet-4-6   (faster, cheaper)
-                      claude-haiku-4-5    (fastest, most cost-effective)
+  --provider, -p    AI provider: claude (default) or ollama
+  --model, -m       Model to use:
+                      Claude:  claude-opus-4-6 (default)
+                               claude-sonnet-4-6
+                               claude-haiku-4-5
+                      Ollama:  gemma3 (default)
+                               gemma3:12b
+                               llama3
+                               mistral
+                               codellama
+  --host            Ollama server URL (default: http://localhost:11434)
   --no-context      Skip reading recent commits for style matching
   -h, --help        Show help message
 ```
@@ -207,59 +221,60 @@ Options:
 
 ## Step-by-Step Workflow
 
-### Scenario 1 — You made changes and want to commit
-
-```bash
-# Step 1: Check what changed
-git status
-
-# Step 2: Stage everything (or specific files)
-git add .
-# git add src/auth.py    ← stage a specific file
-
-# Step 3: Preview the generated commit message
-smart-commit
-
-# Step 4: If happy with it, commit
-smart-commit --apply
-```
-
-### Scenario 2 — Quick commit without previewing
+### Scenario 1 — Quick commit with Claude
 
 ```bash
 git add .
 smart-commit --apply
 ```
 
-### Scenario 3 — Generate message without staging first
+### Scenario 2 — Free local commit with Ollama
+
+```bash
+git add .
+smart-commit --provider ollama --apply
+```
+
+### Scenario 3 — Preview before committing
+
+```bash
+git add .
+smart-commit --provider ollama   # preview
+smart-commit --provider ollama --apply  # commit if happy
+```
+
+### Scenario 4 — Analyze all changes without staging
 
 ```bash
 smart-commit --all
-# Preview only — does NOT commit automatically
+# or
+smart-commit --provider ollama --all
 ```
 
-### Scenario 4 — Generate, copy, then paste manually
+### Scenario 5 — Generate, copy, paste manually
 
 ```bash
 git add .
 smart-commit --copy
-git commit    # opens editor with your clipboard content
+git commit   # paste from clipboard
 ```
 
 ---
 
 ## How It Works
 
-1. Runs `git diff --cached` (or `git diff` with `--all`) to get your changes
-2. Runs `git status` to see which files are affected
-3. Reads your last 5 commit messages to match your repo's style
-4. Sends everything to Claude AI with a structured prompt
-5. Claude returns a conventional commit message
-6. The message is displayed — and optionally applied or copied
+1. Runs `git diff --cached` (or `git diff` with `--all`) to capture your changes
+2. Runs `git status` to see which files changed
+3. Reads your last 5 commits to match your repo's style
+4. Sends everything to Claude or Ollama with a structured prompt
+5. Returns a conventional commit message
+6. Displays it — optionally applies or copies it
 
 ---
 
 ## Models Comparison
+
+### Claude Models
 
 | Model                  | Speed    | Cost     | Best For                        |
 |------------------------|----------|----------|---------------------------------|
@@ -267,22 +282,70 @@ git commit    # opens editor with your clipboard content
 | `claude-sonnet-4-6`    | Fast     | Medium   | Most everyday commits           |
 | `claude-haiku-4-5`     | Fastest  | Lowest   | Simple changes, high volume     |
 
+### Ollama Models
+
+| Model          | Size   | RAM Needed | Best For              |
+|----------------|--------|------------|-----------------------|
+| `gemma3`       | 3.3 GB | 8 GB       | General use (default) |
+| `gemma3:12b`   | 7.8 GB | 16 GB      | Better quality        |
+| `codellama`    | 3.8 GB | 8 GB       | Code-heavy changes    |
+| `llama3`       | 4.7 GB | 8 GB       | General use           |
+| `mistral`      | 4.1 GB | 8 GB       | General use           |
+
+---
+
+## Team Setup with Shared Ollama Server
+
+Run Ollama on a shared server (e.g. DigitalOcean) so your whole team can use it for free.
+
+### Server Requirements
+
+| Spec | Value |
+|---|---|
+| OS | Ubuntu 22.04 LTS |
+| RAM | 16 GB |
+| vCPUs | 4 |
+| Storage | 320 GB SSD |
+
+### Server Setup
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the model
+ollama pull gemma3
+
+# Start Ollama accessible to your team
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+### Each Team Member
+
+```bash
+# Install smart-commit
+pip install smart-commit-generator
+
+# Set the shared server (add to shell profile)
+export SMART_COMMIT_PROVIDER=ollama
+export SMART_COMMIT_OLLAMA_HOST=http://YOUR_SERVER_IP:11434
+
+# Use it
+smart-commit
+```
+
 ---
 
 ## Troubleshooting
 
 ### `smart-commit: command not found`
 
-Re-install the package:
 ```bash
-cd path/to/smart-commit-generator
-pip install -e .
+pip install smart-commit-generator
 ```
 
-On macOS, if pip installs to a path not on your `$PATH`:
+On macOS if not found after install:
 ```bash
-pip install -e . --user
-# Then add to PATH:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -290,61 +353,57 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### `ANTHROPIC_API_KEY environment variable not set`
 
-The key isn't set in your current terminal session.
+Set your API key — see [Setting the API Key](#setting-the-api-key) above.
 
-**Windows CMD:**
-```cmd
-set ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
+---
 
-**Windows PowerShell:**
-```powershell
-$env:ANTHROPIC_API_KEY = "sk-ant-your-key-here"
-```
+### `Cannot connect to Ollama`
 
-**macOS/Linux:**
+Make sure Ollama is running:
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+ollama serve
 ```
 
-For a permanent fix, see the [Setting the API Key](#setting-the-api-key) section above.
+Or check if it's already running:
+```bash
+# Windows
+tasklist | findstr ollama
+
+# macOS/Linux
+ps aux | grep ollama
+```
 
 ---
 
 ### `No staged changes`
 
-You need to stage files before running `smart-commit`:
+Stage your files first:
 ```bash
 git add .
 smart-commit
 ```
 
-Or analyze unstaged changes directly:
+Or use `--all` to analyze without staging:
 ```bash
 smart-commit --all
 ```
 
 ---
 
-### `Not inside a git repository`
+### Ollama is slow
 
-Make sure you're inside a git project folder:
-```bash
-cd path/to/your/project
-git status    # should show repo status, not an error
-smart-commit
-```
+- Use a smaller model: `smart-commit --provider ollama --model gemma3` (3.3GB, fastest)
+- Use a remote GPU server for sub-5-second responses
+- Claude API is faster than local CPU Ollama
 
 ---
 
-### Clipboard not working on macOS/Linux
+### Clipboard not working on Linux
 
-- **macOS:** Should work out of the box (uses `pbcopy`)
-- **Linux:** Install `xclip`:
-  ```bash
-  sudo apt install xclip      # Ubuntu/Debian
-  sudo dnf install xclip      # Fedora
-  ```
+```bash
+sudo apt install xclip      # Ubuntu/Debian
+sudo dnf install xclip      # Fedora
+```
 
 ---
 
@@ -355,8 +414,29 @@ smart-commit-generator/
 ├── smart_commit.py     ← Main CLI script
 ├── setup.py            ← Package config & entry point
 ├── requirements.txt    ← Dependencies (anthropic)
+├── .github/
+│   └── workflows/
+│       └── python-publish.yml  ← Auto-publish to PyPI on release
 └── README.md           ← This file
 ```
+
+---
+
+## Changelog
+
+### v1.1.0
+- Added Ollama provider support (free, local, no API key needed)
+- Live spinner with elapsed timer for Ollama responses
+- `--provider` flag to switch between Claude and Ollama
+- `--host` flag for remote Ollama servers (team sharing)
+- `SMART_COMMIT_PROVIDER` and `SMART_COMMIT_OLLAMA_HOST` env vars
+
+### v1.0.0
+- Initial release
+- Claude AI powered commit message generation
+- Conventional Commits format
+- `--apply`, `--copy`, `--all`, `--model` flags
+- Windows and macOS support
 
 ---
 
