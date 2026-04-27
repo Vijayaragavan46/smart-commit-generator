@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
 Smart Commit Message Generator
-Analyzes git changes and generates conventional commit messages using Claude AI.
+Analyzes git changes and generates conventional commit messages using Claude AI or Ollama.
 """
 
 import subprocess
 import sys
 import os
 import argparse
-
-try:
-    import anthropic
-except ImportError:
-    print("Error: anthropic package not installed. Run: pip install anthropic")
-    sys.exit(1)
+import json
+import urllib.request
+import urllib.error
 
 
 SYSTEM_PROMPT = """You are an expert at writing conventional Git commit messages.
@@ -43,6 +40,8 @@ Rules:
 - Only include body if the change needs explanation beyond the subject line
 - Output ONLY the commit message, nothing else — no markdown, no explanation
 """
+
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 
 
 def run_git_command(args: list[str]) -> tuple[str, int]:
@@ -106,21 +105,8 @@ def truncate_diff(diff: str, max_chars: int = 12000) -> str:
     return "\n".join(truncated)
 
 
-def generate_commit_message(
-    diff: str,
-    status: str,
-    recent_commits: str,
-    model: str = "claude-opus-4-6",
-) -> str:
-    """Call Claude API to generate a commit message."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("Error: ANTHROPIC_API_KEY environment variable not set.")
-        print("Get your key at https://console.anthropic.com")
-        sys.exit(1)
-
-    client = anthropic.Anthropic(api_key=api_key)
-
+def build_user_message(diff: str, status: str, recent_commits: str) -> str:
+    """Build the user message from git context."""
     context_parts = []
 
     if status:
@@ -137,17 +123,87 @@ def generate_commit_message(
             f"## Recent Commit Style (for reference only)\n```\n{recent_commits}\n```"
         )
 
-    user_message = "\n\n".join(context_parts)
-    user_message += "\n\nGenerate a conventional commit message for these changes."
+    return "\n\n".join(context_parts) + "\n\nGenerate a conventional commit message for these changes."
 
+
+def generate_with_claude(user_message: str, model: str) -> str:
+    """Generate commit message using Claude API."""
+    try:
+        import anthropic
+    except ImportError:
+        print("Error: anthropic package not installed. Run: pip install anthropic")
+        sys.exit(1)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Error: ANTHROPIC_API_KEY environment variable not set.")
+        print("Get your key at https://console.anthropic.com")
+        sys.exit(1)
+
+    client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
         model=model,
         max_tokens=512,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )
-
     return response.content[0].text.strip()
+
+
+def generate_with_ollama(user_message: str, model: str, host: str) -> str:
+    """Generate commit message using Ollama local API."""
+    url = f"{host.rstrip('/')}/api/chat"
+
+    payload = json.dumps({
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            text = result["message"]["content"].strip()
+            # Strip markdown code fences some models wrap output in
+            if text.startswith("```"):
+                lines = text.splitlines()
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
+            return text
+    except urllib.error.URLError:
+        print(f"\nError: Cannot connect to Ollama at {host}")
+        print("Make sure Ollama is running. Start it with: ollama serve")
+        sys.exit(1)
+    except KeyError:
+        print("\nError: Unexpected response from Ollama.")
+        sys.exit(1)
+
+
+def generate_commit_message(
+    diff: str,
+    status: str,
+    recent_commits: str,
+    provider: str = "claude",
+    model: str = "claude-opus-4-6",
+    ollama_host: str = DEFAULT_OLLAMA_HOST,
+) -> str:
+    """Generate a commit message using the selected provider."""
+    user_message = build_user_message(diff, status, recent_commits)
+
+    if provider == "ollama":
+        return generate_with_ollama(user_message, model, ollama_host)
+    else:
+        return generate_with_claude(user_message, model)
 
 
 def apply_commit(message: str) -> None:
@@ -187,15 +243,18 @@ def copy_to_clipboard(text: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate smart commit messages using Claude AI",
+        description="Generate smart commit messages using Claude AI or Ollama",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  smart-commit                    Analyze staged changes, show message
-  smart-commit --all              Analyze all changes (staged + unstaged)
-  smart-commit --apply            Generate and immediately commit
-  smart-commit --copy             Generate and copy to clipboard
-  smart-commit --model sonnet     Use Claude Sonnet (faster, cheaper)
+  smart-commit                              Staged changes via Claude
+  smart-commit --all                        All changes via Claude
+  smart-commit --apply                      Generate and immediately commit
+  smart-commit --copy                       Copy message to clipboard
+  smart-commit --provider ollama            Use local Ollama (gemma3 default)
+  smart-commit --provider ollama --model gemma3:12b
+  smart-commit --provider ollama --host http://YOUR_SERVER_IP:11434
+  smart-commit --model claude-sonnet-4-6   Use Claude Sonnet
         """,
     )
     parser.add_argument(
@@ -214,10 +273,23 @@ Examples:
         help="Copy the generated message to clipboard",
     )
     parser.add_argument(
+        "--provider", "-p",
+        default=os.environ.get("SMART_COMMIT_PROVIDER", "claude"),
+        choices=["claude", "ollama"],
+        help="AI provider to use: claude (default) or ollama (local/free)",
+    )
+    parser.add_argument(
         "--model", "-m",
-        default="claude-opus-4-6",
-        choices=["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
-        help="Claude model to use (default: claude-opus-4-6)",
+        default=None,
+        help=(
+            "Model to use. Claude: claude-opus-4-6 (default), claude-sonnet-4-6, claude-haiku-4-5. "
+            "Ollama: gemma3 (default), gemma3:12b, llama3, mistral, codellama"
+        ),
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("SMART_COMMIT_OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
+        help=f"Ollama server host (default: {DEFAULT_OLLAMA_HOST}). Can also set SMART_COMMIT_OLLAMA_HOST env var",
     )
     parser.add_argument(
         "--no-context",
@@ -227,13 +299,18 @@ Examples:
 
     args = parser.parse_args()
 
+    # Set default model based on provider
+    if args.model is None:
+        args.model = "gemma3" if args.provider == "ollama" else "claude-opus-4-6"
+
     # Verify we're in a git repo
     _, code = run_git_command(["rev-parse", "--git-dir"])
     if code != 0:
         print("Error: Not inside a git repository.")
         sys.exit(1)
 
-    print("Analyzing changes...", end=" ", flush=True)
+    provider_label = f"Ollama ({args.model})" if args.provider == "ollama" else f"Claude ({args.model})"
+    print(f"Analyzing changes via {provider_label}...", end=" ", flush=True)
 
     diff = get_git_diff(staged_only=not args.all)
     status = get_git_status()
@@ -253,13 +330,15 @@ Examples:
         diff=diff,
         status=status,
         recent_commits=recent_commits,
+        provider=args.provider,
         model=args.model,
+        ollama_host=args.host,
     )
 
     print("done.\n")
-    print("─" * 60)
+    print("-" * 60)
     print(message)
-    print("─" * 60)
+    print("-" * 60)
 
     if args.copy:
         if copy_to_clipboard(message):
