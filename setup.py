@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="smart-commit-generator",
-    version="1.0.0",
+    version="1.1.0",
     author="Vijayaragavan46",
     author_email="",
     description="AI-powered Git commit message generator using Claude",
